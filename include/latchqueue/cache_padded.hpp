@@ -21,10 +21,10 @@ struct alignas(kCacheLine) CachePadded {
   const T& operator*() const noexcept { return value; }
   T* operator->() noexcept { return &value; }
   const T* operator->() const noexcept { return &value; }
-
- private:
-  // Ensure trailing padding even when sizeof(T) is an exact multiple.
-  char pad_[kCacheLine - (sizeof(T) % kCacheLine == 0 ? kCacheLine : sizeof(T) % kCacheLine)]{};
 };
+
+// alignas() rounds sizeof up to a multiple of the alignment, so adjacent
+// CachePadded objects never share a line.
+static_assert(sizeof(CachePadded<char>) == kCacheLine);
 
 }  // namespace latchqueue
