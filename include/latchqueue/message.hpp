@@ -8,10 +8,10 @@
 
 namespace latchqueue {
 
-// Maximum payload carried inline. Message is sized to four 64-byte cache
-// lines (16B header + 240B payload) so copies are a handful of vector moves
+// Maximum payload carried inline. Message is sized to exactly four 64-byte
+// cache lines (24B header + 232B payload) so copies are a few vector moves
 // and the queue never allocates.
-inline constexpr std::size_t kMaxPayload = 240;
+inline constexpr std::size_t kMaxPayload = 232;
 
 using TopicId = std::uint32_t;
 
@@ -42,6 +42,6 @@ struct Message {
 };
 
 static_assert(std::is_trivially_copyable_v<Message>, "Message must be trivially copyable");
-static_assert(sizeof(Message) == 264, "unexpected Message layout");
+static_assert(sizeof(Message) == 256, "unexpected Message layout");
 
 }  // namespace latchqueue

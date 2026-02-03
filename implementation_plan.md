@@ -15,7 +15,7 @@ latency, using bounded lock-free MPMC ring buffers.
 | Secondary queue | SPSC ring (Lamport with cached indices) | Lets each session buffer outbound frames without contention. |
 | False sharing | `alignas(64)` padded head/tail/slots | Producers and consumers don't fight over cache lines. |
 | Waiting strategy | Pluggable: busy-spin, spin-then-yield, spin-then-park (C++20-free futex emulation with condvar fallback) | Callers choose between latency and CPU use. |
-| Message payload | Fixed-capacity inline buffer (`Message` with up to 240 bytes inline), so it is trivially copyable | No allocation on the hot path. |
+| Message payload | Fixed-capacity inline buffer (`Message` with up to 232 bytes inline), so it is trivially copyable | No allocation on the hot path. |
 | Data plane | Boost.Asio, length-prefixed binary frames, one `io_context` per thread | Low overhead, async, no HTTP/2 framing cost. |
 | Control plane | gRPC (`latchqueue.v1.Broker`): CreateTopic, ListTopics, Publish, Subscribe (server stream), GetStats | Easy to use from any language, and good for tooling. |
 | Fan-out model | Each topic has N subscription queues. A publish copies into every subscription's MPMC queue. Consumers in one subscription compete (work-queue semantics). | This is the familiar pub/sub plus consumer-group model. |
