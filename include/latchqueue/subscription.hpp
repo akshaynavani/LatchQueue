@@ -36,7 +36,17 @@ class Subscription {
   // Called by Topic::publish on the publisher's thread.
   bool offer(const Message& msg) {
     if (policy_ == OverflowPolicy::kBlock) {
-      queue_.push(msg);
+      // Back-pressure, but bail out if the subscription is torn down while
+      // we wait so publishers can never hang on a dead consumer group.
+      SpinYieldWait waiter;
+      std::uint32_t iteration = 0;
+      while (!queue_.try_push(msg)) {
+        if (closed()) {
+          dropped_->fetch_add(1, std::memory_order_relaxed);
+          return false;
+        }
+        waiter.wait(iteration);
+      }
     } else if (!queue_.try_push(msg)) {
       dropped_->fetch_add(1, std::memory_order_relaxed);
       return false;
