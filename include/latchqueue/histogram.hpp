@@ -11,8 +11,8 @@ namespace latchqueue {
 //
 // Values are bucketed by their most significant bit (the "magnitude") and then
 // split linearly into kSubBuckets within each magnitude, giving roughly 6%
-// relative precision across the full 64-bit range with 1 KiB of counters per
-// 128 buckets. Recording is a single relaxed fetch_add.
+// relative precision across the full 64-bit range using 8 KiB of counters.
+// Recording is a single relaxed fetch_add plus min/max updates.
 class LatencyHistogram {
  public:
   static constexpr unsigned kSubBucketBits = 4;
