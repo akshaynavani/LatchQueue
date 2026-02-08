@@ -28,3 +28,12 @@ target_compile_options(latchqueue_primitives INTERFACE
 if(LQ_NATIVE)
   target_compile_options(latchqueue_primitives INTERFACE -march=native)
 endif()
+
+# ---------------------------------------------------------------------------
+# Broker core
+# ---------------------------------------------------------------------------
+add_library(latchqueue_core
+  src/histogram.cpp
+  src/topic.cpp
+  src/broker.cpp)
+target_link_libraries(latchqueue_core PUBLIC latchqueue_primitives)
