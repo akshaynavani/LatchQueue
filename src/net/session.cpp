@@ -1,7 +1,5 @@
 #include "latchqueue/net/session.hpp"
 
-#include <iostream>
-
 namespace latchqueue::net {
 
 namespace asio = boost::asio;
