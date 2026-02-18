@@ -111,7 +111,7 @@ grpc::Status GrpcService::Subscribe(grpc::ServerContext* ctx, const v1::Subscrib
     delivery.set_publish_ts_ns(msg.header.publish_ts_ns);
     delivery.set_payload(msg.payload, msg.size);
     // Hint gRPC to coalesce writes while the queue still has backlog.
-    const bool more = sub->stats().depth > 0;
+    const bool more = sub->depth() > 0;
     if (!writer->Write(delivery, more ? batched : grpc::WriteOptions())) break;
     if (limit != 0 && ++sent >= limit) break;
   }

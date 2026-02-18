@@ -93,6 +93,7 @@ class Subscription {
   }
 
   const LatencyHistogram& latency() const noexcept { return latency_; }
+  std::size_t depth() const noexcept { return queue_.size_approx(); }
 
  private:
   void on_delivered(const Message& msg) noexcept {
