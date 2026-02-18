@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package latchqueue.v1;
+
+option cc_enable_arenas = true;
+
+// Control plane and convenience pub/sub API for LatchQueue.
+// The lowest-latency path is the binary TCP protocol; gRPC trades a few
+// microseconds for language-neutral tooling and management.
+service Broker {
+  rpc CreateTopic(CreateTopicRequest) returns (TopicInfo);
+  rpc DeleteTopic(DeleteTopicRequest) returns (DeleteTopicResponse);
+  rpc ListTopics(ListTopicsRequest) returns (ListTopicsResponse);
+
+  rpc Publish(PublishRequest) returns (PublishResponse);
+  // Client-streaming publish: amortises per-RPC overhead for bulk loads.
+  rpc PublishStream(stream PublishRequest) returns (PublishStreamSummary);
+
+  // Server-streaming consume. Consumers sharing a subscription name compete
+  // for messages; distinct names each receive every message.
+  rpc Subscribe(SubscribeRequest) returns (stream Delivery);
+  rpc Unsubscribe(UnsubscribeRequest) returns (UnsubscribeResponse);
+
+  rpc GetStats(GetStatsRequest) returns (StatsResponse);
+}
+
+enum OverflowPolicy {
+  DROP_NEWEST = 0;
+  BLOCK = 1;
+}
+
+message CreateTopicRequest { string name = 1; }
+
+message TopicInfo {
+  string name = 1;
+  uint32 id = 2;
+  uint64 published = 3;
+  repeated string subscriptions = 4;
+}
+
+message DeleteTopicRequest { string name = 1; }
+message DeleteTopicResponse { bool deleted = 1; }
+
+message ListTopicsRequest {}
+message ListTopicsResponse { repeated TopicInfo topics = 1; }
+
+message PublishRequest {
+  string topic = 1;
+  bytes payload = 2;
+}
+
+message PublishResponse {
+  uint64 sequence = 1;
+  uint32 delivered_to = 2;
+  uint32 dropped_by = 3;
+}
+
+message PublishStreamSummary {
+  uint64 accepted = 1;
+  uint64 rejected = 2;
+  uint64 last_sequence = 3;
+}
+
+message SubscribeRequest {
+  string topic = 1;
+  string subscription = 2;     // consumer-group name; defaults to "default"
+  uint32 capacity = 3;         // queue capacity when the subscription is new
+  OverflowPolicy policy = 4;
+  uint32 max_messages = 5;     // 0 = stream until cancelled
+}
+
+message Delivery {
+  uint32 topic_id = 1;
+  uint64 sequence = 2;
+  uint64 publish_ts_ns = 3;
+  bytes payload = 4;
+}
+
+message UnsubscribeRequest {
+  string topic = 1;
+  string subscription = 2;
+}
+message UnsubscribeResponse { bool removed = 1; }
+
+message GetStatsRequest {}
+
+message LatencySummary {
+  uint64 count = 1;
+  double mean_ns = 2;
+  uint64 min_ns = 3;
+  uint64 p50_ns = 4;
+  uint64 p99_ns = 5;
+  uint64 p999_ns = 6;
+  uint64 max_ns = 7;
+}
+
+message SubscriptionStats {
+  string name = 1;
+  uint64 enqueued = 2;
+  uint64 delivered = 3;
+  uint64 dropped = 4;
+  uint64 depth = 5;
+  uint64 capacity = 6;
+  LatencySummary latency = 7;
+}
+
+message TopicStats {
+  string name = 1;
+  uint32 id = 2;
+  uint64 published = 3;
+  repeated SubscriptionStats subscriptions = 4;
+}
+
+message StatsResponse {
+  uint64 uptime_ns = 1;
+  uint64 total_published = 2;
+  uint64 total_delivered = 3;
+  uint64 total_dropped = 4;
+  repeated TopicStats topics = 5;
+}
