@@ -93,3 +93,9 @@ if(LQ_BUILD_GRPC)
   target_link_libraries(latchqueue_server PRIVATE latchqueue_rpc)
   target_compile_definitions(latchqueue_server PRIVATE LQ_WITH_GRPC=1)
 endif()
+
+# ---------------------------------------------------------------------------
+# Client library and CLI
+# ---------------------------------------------------------------------------
+add_library(latchqueue_client src/client/tcp_client.cpp src/net/protocol.cpp)
+target_link_libraries(latchqueue_client PUBLIC latchqueue_primitives Boost::system)
