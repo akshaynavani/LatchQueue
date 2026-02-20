@@ -50,3 +50,46 @@ add_library(latchqueue_net
   src/net/tcp_server.cpp)
 target_link_libraries(latchqueue_net PUBLIC latchqueue_core Boost::system)
 target_compile_definitions(latchqueue_net PUBLIC BOOST_ASIO_NO_DEPRECATED)
+
+# ---------------------------------------------------------------------------
+# gRPC control plane
+# ---------------------------------------------------------------------------
+if(LQ_BUILD_GRPC)
+  find_package(Protobuf CONFIG REQUIRED)
+  find_package(gRPC CONFIG REQUIRED)
+
+  set(LQ_PROTO ${CMAKE_CURRENT_SOURCE_DIR}/proto/latchqueue.proto)
+  set(LQ_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+  file(MAKE_DIRECTORY ${LQ_GEN_DIR})
+  set(LQ_GEN_SRCS
+    ${LQ_GEN_DIR}/latchqueue.pb.cc
+    ${LQ_GEN_DIR}/latchqueue.pb.h
+    ${LQ_GEN_DIR}/latchqueue.grpc.pb.cc
+    ${LQ_GEN_DIR}/latchqueue.grpc.pb.h)
+
+  add_custom_command(
+    OUTPUT ${LQ_GEN_SRCS}
+    COMMAND $<TARGET_FILE:protobuf::protoc>
+      --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/proto
+      --cpp_out=${LQ_GEN_DIR}
+      --grpc_out=${LQ_GEN_DIR}
+      --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
+      ${LQ_PROTO}
+    DEPENDS ${LQ_PROTO}
+    COMMENT "Generating gRPC sources from latchqueue.proto")
+
+  add_library(latchqueue_rpc ${LQ_GEN_SRCS} src/rpc/grpc_service.cpp)
+  target_include_directories(latchqueue_rpc PUBLIC ${LQ_GEN_DIR})
+  target_link_libraries(latchqueue_rpc PUBLIC latchqueue_core gRPC::grpc++ protobuf::libprotobuf)
+endif()
+
+# ---------------------------------------------------------------------------
+# Server binary
+# ---------------------------------------------------------------------------
+add_executable(latchqueue_server src/server_main.cpp src/config.cpp)
+target_include_directories(latchqueue_server PRIVATE src)
+target_link_libraries(latchqueue_server PRIVATE latchqueue_net)
+if(LQ_BUILD_GRPC)
+  target_link_libraries(latchqueue_server PRIVATE latchqueue_rpc)
+  target_compile_definitions(latchqueue_server PRIVATE LQ_WITH_GRPC=1)
+endif()
