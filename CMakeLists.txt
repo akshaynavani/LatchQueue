@@ -105,3 +105,33 @@ target_link_libraries(latchqueue_client PUBLIC latchqueue_protocol Boost::system
 
 add_executable(lq_cli tools/lq_cli.cpp)
 target_link_libraries(lq_cli PRIVATE latchqueue_client)
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+if(LQ_BUILD_TESTS)
+  include(FetchContent)
+  FetchContent_Declare(googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googletest)
+
+  enable_testing()
+  include(GoogleTest)
+
+  add_executable(latchqueue_tests
+    tests/mpmc_queue_test.cpp
+    tests/spsc_queue_test.cpp
+    tests/histogram_test.cpp
+    tests/broker_test.cpp
+    tests/protocol_test.cpp)
+  target_link_libraries(latchqueue_tests PRIVATE latchqueue_core latchqueue_protocol GTest::gtest_main)
+  gtest_discover_tests(latchqueue_tests)
+
+  add_executable(latchqueue_integration_tests tests/tcp_integration_test.cpp)
+  target_link_libraries(latchqueue_integration_tests PRIVATE
+    latchqueue_net latchqueue_client GTest::gtest_main)
+  gtest_discover_tests(latchqueue_integration_tests)
+endif()
