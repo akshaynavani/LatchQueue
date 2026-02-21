@@ -102,3 +102,6 @@ endif()
 # ---------------------------------------------------------------------------
 add_library(latchqueue_client src/client/tcp_client.cpp)
 target_link_libraries(latchqueue_client PUBLIC latchqueue_protocol Boost::system)
+
+add_executable(lq_cli tools/lq_cli.cpp)
+target_link_libraries(lq_cli PRIVATE latchqueue_client)
