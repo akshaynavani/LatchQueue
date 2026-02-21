@@ -43,12 +43,15 @@ target_link_libraries(latchqueue_core PUBLIC latchqueue_primitives)
 # ---------------------------------------------------------------------------
 find_package(Boost 1.74 REQUIRED COMPONENTS system)
 
+# Wire protocol codec, shared by the server and the client.
+add_library(latchqueue_protocol src/net/protocol.cpp)
+target_link_libraries(latchqueue_protocol PUBLIC latchqueue_primitives)
+
 add_library(latchqueue_net
-  src/net/protocol.cpp
   src/net/delivery_pump.cpp
   src/net/session.cpp
   src/net/tcp_server.cpp)
-target_link_libraries(latchqueue_net PUBLIC latchqueue_core Boost::system)
+target_link_libraries(latchqueue_net PUBLIC latchqueue_core latchqueue_protocol Boost::system)
 target_compile_definitions(latchqueue_net PUBLIC BOOST_ASIO_NO_DEPRECATED)
 
 # ---------------------------------------------------------------------------
@@ -97,5 +100,5 @@ endif()
 # ---------------------------------------------------------------------------
 # Client library and CLI
 # ---------------------------------------------------------------------------
-add_library(latchqueue_client src/client/tcp_client.cpp src/net/protocol.cpp)
-target_link_libraries(latchqueue_client PUBLIC latchqueue_primitives Boost::system)
+add_library(latchqueue_client src/client/tcp_client.cpp)
+target_link_libraries(latchqueue_client PUBLIC latchqueue_protocol Boost::system)
