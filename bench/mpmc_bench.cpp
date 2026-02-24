@@ -7,7 +7,9 @@
 // (--latency) runs a 1:1 ping-pong over two queues and records the one-way
 // enqueue->dequeue latency, which isolates the queue's handoff cost.
 
+#include <algorithm>
 #include <atomic>
+#include <utility>
 #include <thread>
 #include <vector>
 
@@ -101,9 +103,10 @@ int main(int argc, char** argv) {
     latency(std::min<std::uint64_t>(messages, 2'000'000), pin);
     return 0;
   }
-  // Sweep a few shapes if the user didn't ask for a specific one.
+  // --sweep runs a fixed set of producer/consumer shapes.
   if (bench::arg_flag(argc, argv, "--sweep")) {
-    for (auto [p, c] : {std::pair{1, 1}, {2, 2}, {4, 4}, {4, 1}, {1, 4}}) {
+    const std::pair<int, int> shapes[] = {{1, 1}, {2, 2}, {4, 4}, {4, 1}, {1, 4}};
+    for (const auto& [p, c] : shapes) {
       throughput(p, c, messages, capacity, pin);
     }
   } else {
