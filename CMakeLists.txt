@@ -135,3 +135,17 @@ if(LQ_BUILD_TESTS)
     latchqueue_net latchqueue_client GTest::gtest_main)
   gtest_discover_tests(latchqueue_integration_tests)
 endif()
+
+# ---------------------------------------------------------------------------
+# Benchmarks
+# ---------------------------------------------------------------------------
+if(LQ_BUILD_BENCH)
+  add_executable(mpmc_bench bench/mpmc_bench.cpp)
+  target_link_libraries(mpmc_bench PRIVATE latchqueue_core)
+
+  add_executable(broker_bench bench/broker_bench.cpp)
+  target_link_libraries(broker_bench PRIVATE latchqueue_core)
+
+  add_executable(tcp_bench bench/tcp_bench.cpp)
+  target_link_libraries(tcp_bench PRIVATE latchqueue_net latchqueue_client)
+endif()
