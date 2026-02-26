@@ -1,0 +1,41 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+_deps/
+compile_commands.json
+
+# Generated protobuf/gRPC sources
+generated/
+*.pb.h
+*.pb.cc
+
+# Objects and binaries
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe
+
+# Tooling
+.cache/
+.clangd/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local configuration
+.env
+!.env.example
+
+# Profiling / benchmark artefacts
+perf.data*
+*.trace
