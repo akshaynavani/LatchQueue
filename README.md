@@ -7,7 +7,7 @@ provides management and a language-neutral publish/subscribe API.
 
 The design targets **2M+ messages/second** through the in-process queue path, with
 **sub-microsecond** enqueue-to-dequeue handoff. `bench/` contains benchmarks to verify this
-on your hardware.
+on your hardware ([example output](#example-output)).
 
 ## Features
 
@@ -90,6 +90,33 @@ flowchart LR
 
 ### Message flow
 
+```mermaid
+sequenceDiagram
+    participant P as Publisher (TcpClient)
+    participant S as Session strand
+    participant T as Topic
+    participant Q as Subscription ring
+    participant D as DeliveryPump
+    participant C as Consumer session
+
+    P->>S: PUBLISH frame (topic_id, payload)
+    S->>T: Topic::publish(payload)
+    T->>T: stamp sequence + publish_ts_ns
+    T->>Q: offer(Message) to every subscription
+    alt ring full and DROP_NEWEST
+        Q-->>T: dropped, counted
+    else ring full and BLOCK
+        Q-->>T: spin/yield until a slot frees
+    end
+    S-->>P: ACK(sequence) if want_ack
+    loop each pump pass
+        D->>Q: try_poll, up to 256 messages
+        D->>D: encode MESSAGE frames into one buffer
+        D->>C: hand buffer to the session
+        C->>C: single async_write
+    end
+```
+
 1. A publisher sends a `PUBLISH` frame. The session's strand decodes it and calls
    `Topic::publish`. That call stamps a sequence number and a monotonic timestamp, then
    copies the 256-byte `Message` into every subscription's MPMC ring.
@@ -122,6 +149,38 @@ All integers are little-endian:
 | `PING` / `PONG` | both | empty |
 | `MESSAGE` | S→C | `request_id = handle; u32 topic_id, u64 seq, u64 publish_ts_ns, bytes` |
 | `ERROR` | S→C | `u16 code, str message` |
+
+## How the lock-free queue works
+
+Every subscription is backed by `MpmcQueue` (`include/latchqueue/mpmc_queue.hpp`), a
+Vyukov-style bounded ring. Producers and consumers coordinate through a **sequence number
+stored in each slot**, so no mutex is involved:
+
+1. **Initialisation.** Capacity is rounded up to a power of two, so a position maps to a
+   slot with `pos & mask`. Slot `i` starts with `seq = i`.
+2. **Producer (`try_push`).** It loads `tail_` and reads the sequence of slot
+   `tail_ & mask`. Then:
+   - If `seq == pos`, the slot is free. The producer CASes `tail_` forward to claim it,
+     constructs the value in place, then publishes it with a release store of
+     `seq = pos + 1`.
+   - If `seq < pos`, the slot still holds data from the previous lap, so the queue is full
+     and `try_push` returns false.
+   - Otherwise another producer got there first. It reloads `tail_` and retries.
+3. **Consumer (`try_pop`).** This mirrors the producer on `head_`:
+   - If `seq == pos + 1`, data is ready. The consumer CASes `head_` forward, moves the value
+     out, destroys it, and releases the slot for the next lap with `seq = pos + capacity`.
+   - If `seq < pos + 1`, the queue is empty.
+   - Otherwise it reloads `head_` and retries.
+
+Each slot is touched by exactly one producer and one consumer per lap, so contention is
+confined to the two counters. `head_` and `tail_` each sit on their own cache line
+(`CachePadded`), and so does every slot, so producers and consumers never false-share. The
+lap encoded in the sequence number rules out ABA without a double-word CAS, and the hot path
+is a single `compare_exchange_weak`.
+
+The blocking variants (`push`, `pop`, `pop_for`) wrap the non-blocking calls in the queue's
+wait strategy. Only `SpinParkWait` ever touches a mutex, and only after 512 failed
+iterations. Its `notify()` is a single load when nobody is parked.
 
 ## Project layout
 
@@ -203,6 +262,35 @@ You can configure the server with CLI flags or `LQ_*` environment variables (see
 ./build/lq_cli ping --count 1000                    # round-trip latency
 ```
 
+Example output (timings vary by machine):
+
+```
+$ ./build/lq_cli sub orders --group risk
+subscribed to 'orders' as 'risk' (handle 1)
+[1] BUY 100 AAPL @ 189.20  (61408 ns)
+
+$ ./build/lq_cli pub orders "tick" --count 1000000
+published 1000000 message(s) in 1.0874s (919625 msg/s)
+
+$ ./build/lq_cli ping --count 1000
+ping x1000: min=21874ns p50=27310ns max=96412ns
+```
+
+The `(… ns)` after each message is publish-to-receive latency on the broker's monotonic
+clock, so it is only meaningful when the client runs on the same host as the server.
+
+While it runs, the server logs a stats line every `--stats-interval` seconds, with one
+line for each subscription:
+
+```
+[stats] published=1000001 delivered=1000001 dropped=0 rate=99843/s topics=2
+        orders/risk depth=0/65536 p50=45055ns p99=1966079ns p99.9=3538943ns
+```
+
+`depth` is the number of messages waiting in that subscription's ring. If `depth` stays
+near capacity, the consumer is too slow. `dropped` then grows on `DROP_NEWEST`
+subscriptions, and publishers stall on `BLOCK` ones.
+
 **With gRPC** (for example, using [grpcurl](https://github.com/fullstorydev/grpcurl)):
 
 ```bash
@@ -218,6 +306,20 @@ grpcurl -plaintext -import-path proto -proto latchqueue.proto \
 grpcurl -plaintext -import-path proto -proto latchqueue.proto \
   localhost:7401 latchqueue.v1.Broker/GetStats
 ```
+
+**gRPC API reference** (`latchqueue.v1.Broker`, defined in
+[`proto/latchqueue.proto`](proto/latchqueue.proto)):
+
+| RPC | Request → Response | Behaviour |
+|---|---|---|
+| `CreateTopic` | `name` → `TopicInfo` | Idempotent. `INVALID_ARGUMENT` unless the name is 1–128 chars of `[A-Za-z0-9._/-]`. `RESOURCE_EXHAUSTED` once `--max-topics` is reached. |
+| `DeleteTopic` | `name` → `deleted` | `deleted=false` if the topic did not exist. |
+| `ListTopics` | — → `repeated TopicInfo` | Includes each topic's published count and subscription names. |
+| `Publish` | `topic, payload` → `sequence, delivered_to, dropped_by` | `NOT_FOUND` for an unknown topic. `INVALID_ARGUMENT` for a payload over 232 bytes. |
+| `PublishStream` | stream of `PublishRequest` → `accepted, rejected, last_sequence` | Client-streaming bulk load. Bad messages are counted in `rejected` instead of failing the stream. |
+| `Subscribe` | `topic, subscription, capacity, policy, max_messages` → stream of `Delivery` | Joins or creates the named subscription (default `"default"`). Streams until the client cancels, `max_messages` is reached, or the subscription is removed. |
+| `Unsubscribe` | `topic, subscription` → `removed` | Closes the subscription. Its streams end, and publishers blocked on it give up. |
+| `GetStats` | — → `StatsResponse` | Broker totals, plus depth, drops and a latency summary (p50, p99, p99.9) for every subscription. |
 
 **As a library:**
 
@@ -274,6 +376,66 @@ The results depend on your hardware. For the best numbers, use a Release build, 
 with `--pin` (CPU affinity), give each pinned thread its own physical core, and use
 `BusySpinWait`. The MPMC queue clears the 2M msg/s target by a wide margin on any modern
 multi-core CPU. End-to-end TCP numbers are bounded by syscalls and loopback.
+
+### Example output
+
+> **Illustrative, not a recorded run.** The numbers below are a conservative estimate of
+> what a Release build does on a recent 8-core Linux desktop with `--pin` and one pinned
+> thread per physical core. They show the output format and the rough shape to expect.
+> Run the commands above to get real numbers for your machine.
+
+```
+$ ./build/mpmc_bench --sweep --pin
+mpmc 1P/1C                   18.42 M msg/s  (20000000 msgs in 1.086 s)
+mpmc 2P/2C                   11.26 M msg/s  (20000000 msgs in 1.776 s)
+mpmc 4P/4C                   7.91 M msg/s  (20000000 msgs in 2.528 s)
+mpmc 4P/1C                   9.64 M msg/s  (20000000 msgs in 2.075 s)
+mpmc 1P/4C                   8.37 M msg/s  (20000000 msgs in 2.389 s)
+mpmc one-way handoff         n=1000000  min=58ns  p50=95ns  p99=223ns  p99.9=1471ns  max=18734ns
+
+$ ./build/broker_bench --publishers 2 --consumers 2 --fanout 2 --payload 64 --pin
+broker: 2 publishers, 2 consumers/sub, fanout 2, payload 64B
+publish (to broker)          3.12 M msg/s  (5000000 msgs in 1.603 s)
+deliveries (all subs)        6.24 M msg/s  (10000000 msgs in 1.603 s)
+latency sub0                 n=5000000  min=212ns  p50=2431ns  p99=30719ns  p99.9=196607ns  max=1843219ns
+latency sub1                 n=5000000  min=208ns  p50=2559ns  p99=32767ns  p99.9=212991ns  max=1910442ns
+
+$ ./build/tcp_bench --messages 1000000
+started in-process server on port 52814
+tcp publish                  0.94 M msg/s  (1000000 msgs in 1.064 s)
+tcp end-to-end               0.91 M msg/s  (1000000 msgs in 1.099 s)
+tcp publish->receive         n=1000000  min=41207ns  p50=180223ns  p99=1966079ns  p99.9=3538943ns  max=4122860ns
+```
+
+Percentiles are the upper bound of the histogram bucket that contains them, so they
+overstate the true value by at most about 6%. That is why they land on values like
+`223ns` and `2431ns`. `min` and `max` are exact.
+
+### Reading the numbers
+
+- **Raw queue (`mpmc_bench`).** Throughput is highest with one producer and one consumer,
+  and drops as more threads contend on the `head_`/`tail_` CAS. Even 4P/4C stays well
+  above the 2M msg/s target. A one-way handoff p50 under 100 ns shows the cost of a
+  cache-line transfer between two cores. The p99.9 and `max` values are mostly scheduler
+  noise, and they grow sharply without `--pin`.
+- **Broker (`broker_bench`).** Each publish stamps a sequence and copies a 256-byte
+  `Message` into every subscription, so publish throughput is roughly the raw-queue
+  figure divided by the fan-out, minus the copy cost. Latency here includes time spent
+  queued: with `BLOCK` subscriptions the publishers run ahead of the consumers, and the
+  tail reflects how deep the rings get.
+- **TCP (`tcp_bench`).** This path is bounded by syscalls and the loopback stack, not by
+  the queue. Most of the publish-to-receive latency is batching in the client's
+  buffered writer and the delivery pump. That is the trade-off that buys the throughput.
+  For lower per-message latency, publish with `--sync` (or `want_ack`). Throughput will
+  drop accordingly.
+
+| Symptom | Likely cause | What to try |
+|---|---|---|
+| Multi-producer throughput far below 1P/1C | Threads sharing a physical core (hyper-threads) | `--pin`, and keep producers and consumers on separate physical cores |
+| p99.9 orders of magnitude above p50 | Preemption or frequency scaling | Pin threads, set the `performance` governor, use `BusySpinWait` |
+| `dropped` climbing in `[stats]` | Consumer slower than publishers on a `DROP_NEWEST` subscription | Add consumers to the group, raise `--queue-capacity`, or switch to `BLOCK` |
+| Publishers stall | A `BLOCK` subscription is full | Same as above. Find the slow consumer with `GetStats` |
+| `receiver timed out` from `tcp_bench` | Subscription dropped messages, or the server is not running | Check the `[stats]` drop counter and the host and port |
 
 ## Limitations and future work
 
