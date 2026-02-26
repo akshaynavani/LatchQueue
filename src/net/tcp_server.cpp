@@ -1,6 +1,7 @@
 #include "latchqueue/net/tcp_server.hpp"
 
 #include <iostream>
+#include <iterator>
 
 namespace latchqueue::net {
 

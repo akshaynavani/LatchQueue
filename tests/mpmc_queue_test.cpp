@@ -1,6 +1,8 @@
 #include "latchqueue/mpmc_queue.hpp"
 
 #include <atomic>
+#include <chrono>
+#include <iterator>
 #include <memory>
 #include <numeric>
 #include <thread>

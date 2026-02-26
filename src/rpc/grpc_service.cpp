@@ -109,7 +109,7 @@ grpc::Status GrpcService::Subscribe(grpc::ServerContext* ctx, const v1::Subscrib
     delivery.set_topic_id(msg.topic);
     delivery.set_sequence(msg.header.sequence);
     delivery.set_publish_ts_ns(msg.header.publish_ts_ns);
-    delivery.set_payload(msg.payload, msg.size);
+    delivery.mutable_payload()->assign(msg.payload, msg.size);
     // Hint gRPC to coalesce writes while the queue still has backlog.
     const bool more = sub->depth() > 0;
     if (!writer->Write(delivery, more ? batched : grpc::WriteOptions())) break;
