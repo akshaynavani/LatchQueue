@@ -8,6 +8,7 @@
 // Latency uses the broker's monotonic clock, so it is only meaningful when
 // client and server share a host.
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <thread>

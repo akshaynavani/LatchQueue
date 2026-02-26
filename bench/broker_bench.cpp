@@ -5,6 +5,7 @@
 //   broker_bench [--publishers P] [--consumers C] [--messages N] [--fanout F]
 //                [--payload BYTES] [--pin]
 
+#include <algorithm>
 #include <atomic>
 #include <string>
 #include <thread>
